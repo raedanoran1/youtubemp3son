@@ -11,6 +11,7 @@ import numpy as np
 import io
 import tempfile
 import sys
+import browser_cookie3
 
 # Yeni import
 import yt_dlp
@@ -97,12 +98,36 @@ def convert_to_432hz(input_path, output_path):
         logger.error(f"432 Hz dönüşüm hatası: {str(e)}")
         return False
 
+def get_cookies():
+    """Tarayıcılardan YouTube çerezlerini al"""
+    cookies = {}
+    browsers = [
+        browser_cookie3.chrome,
+        browser_cookie3.firefox,
+        browser_cookie3.edge,
+        browser_cookie3.opera,
+        browser_cookie3.brave
+    ]
+    
+    for browser in browsers:
+        try:
+            for cookie in browser(domain_name='.youtube.com'):
+                cookies[cookie.name] = cookie.value
+        except Exception as e:
+            logger.debug(f"Browser cookie error: {str(e)}")
+            continue
+    
+    return cookies
+
 def download_with_ytdlp(youtube_url):
     """yt-dlp ile video indirme"""
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             logger.debug(f"Geçici dizin oluşturuldu: {temp_dir}")
             filename_template = os.path.join(temp_dir, '%(title)s.%(ext)s')
+            
+            # YouTube çerezlerini al
+            cookies = get_cookies()
             
             ydl_opts = {
                 'format': 'bestaudio/best',
@@ -114,7 +139,9 @@ def download_with_ytdlp(youtube_url):
                 'outtmpl': filename_template,
                 'prefer_ffmpeg': True,
                 'keepvideo': False,
-                'verbose': True
+                'verbose': True,
+                'cookiesfrombrowser': ('chrome',),  # Chrome çerezlerini kullan
+                'cookies': cookies  # Alternatif olarak toplanan çerezleri kullan
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

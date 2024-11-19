@@ -6,3 +6,4 @@ pydub>=0.25.1
 numpy>=1.26.0
 ffmpeg-python>=0.2.0
 Werkzeug>=2.0.3
+browser-cookie3>=0.19.1
