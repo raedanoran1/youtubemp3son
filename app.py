@@ -10,15 +10,20 @@ from pydub import AudioSegment
 import numpy as np
 import io
 import tempfile
+import sys
 
 # Yeni import
 import yt_dlp
 
 # Logging ayarları
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s: %(message)s')
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+app = Flask(__name__, static_url_path='/static', static_folder='static')
 CORS(app)
 
 # Temizleme işlemi için son indirme zamanını takip etmek için global değişken
@@ -96,6 +101,7 @@ def download_with_ytdlp(youtube_url):
     """yt-dlp ile video indirme"""
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
+            logger.debug(f"Geçici dizin oluşturuldu: {temp_dir}")
             filename_template = os.path.join(temp_dir, '%(title)s.%(ext)s')
             
             ydl_opts = {
@@ -108,49 +114,66 @@ def download_with_ytdlp(youtube_url):
                 'outtmpl': filename_template,
                 'prefer_ffmpeg': True,
                 'keepvideo': False,
-                'quiet': False,
-                'no_warnings': False
+                'verbose': True
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 logger.info(f"Video indiriliyor: {youtube_url}")
                 info_dict = ydl.extract_info(youtube_url, download=True)
                 video_title = info_dict['title']
+                logger.debug(f"Video başlığı: {video_title}")
                 
                 # Find the downloaded MP3 file in temp directory
                 mp3_file = None
                 for file in os.listdir(temp_dir):
                     if file.endswith('.mp3'):
                         mp3_file = os.path.join(temp_dir, file)
+                        logger.debug(f"MP3 dosyası bulundu: {mp3_file}")
                         break
                 
                 if not mp3_file:
+                    logger.error("MP3 dosyası bulunamadı")
                     raise Exception("MP3 dosyası bulunamadı")
                 
-                # Convert to 432Hz in memory
-                audio = AudioSegment.from_mp3(mp3_file)
-                ratio = 432.0 / 440.0
-                new_sample_rate = int(audio.frame_rate * ratio)
-                converted_audio = audio._spawn(audio.raw_data, overrides={
-                    "frame_rate": new_sample_rate
-                })
-                converted_audio = converted_audio.set_frame_rate(audio.frame_rate)
-                
-                # Save to bytes buffer
-                buffer = io.BytesIO()
-                converted_audio.export(buffer, format="mp3", bitrate="192k")
-                buffer.seek(0)
-                
-                return buffer, f"{video_title}_432hz.mp3"
+                try:
+                    # Convert to 432Hz in memory
+                    logger.debug("432Hz dönüşümü başlıyor")
+                    audio = AudioSegment.from_mp3(mp3_file)
+                    ratio = 432.0 / 440.0
+                    new_sample_rate = int(audio.frame_rate * ratio)
+                    converted_audio = audio._spawn(audio.raw_data, overrides={
+                        "frame_rate": new_sample_rate
+                    })
+                    converted_audio = converted_audio.set_frame_rate(audio.frame_rate)
+                    
+                    # Save to bytes buffer
+                    logger.debug("Dönüştürülen ses buffer'a kaydediliyor")
+                    buffer = io.BytesIO()
+                    converted_audio.export(buffer, format="mp3", bitrate="192k")
+                    buffer.seek(0)
+                    
+                    safe_title = "".join(x for x in video_title if x.isalnum() or x in [' ', '-', '_']).strip()
+                    safe_filename = f"{safe_title[:50]}_432hz.mp3"
+                    logger.debug(f"İşlem tamamlandı. Filename: {safe_filename}")
+                    
+                    return buffer, safe_filename
+                except Exception as e:
+                    logger.error(f"Ses dönüşümü sırasında hata: {str(e)}")
+                    logger.error(traceback.format_exc())
+                    raise
                 
     except Exception as e:
         logger.error(f"İndirme hatası: {str(e)}")
-        traceback.print_exc()
-        raise e
+        logger.error(traceback.format_exc())
+        raise
 
 @app.route('/')
 def index():
     return app.send_static_file('index.html')
+
+@app.route('/favicon.ico')
+def favicon():
+    return app.send_static_file('favicon.ico')
 
 @app.route('/convert', methods=['POST'])
 def convert():
@@ -185,10 +208,12 @@ def convert():
 
         except Exception as e:
             logger.error(f"Dönüştürme hatası: {str(e)}")
-            return jsonify({'error': 'Dönüştürme işlemi başarısız oldu'}), 500
+            logger.error(traceback.format_exc())
+            return jsonify({'error': str(e)}), 500
 
     except Exception as e:
         logger.error(f"Genel hata: {str(e)}")
+        logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 @app.route('/download/<filename>')
