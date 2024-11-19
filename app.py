@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 from moviepy.editor import AudioFileClip
 import os
@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 import logging
 from pydub import AudioSegment
 import numpy as np
+import io
+import tempfile
 
 # Yeni import
 import yt_dlp
@@ -90,73 +92,57 @@ def convert_to_432hz(input_path, output_path):
         logger.error(f"432 Hz dönüşüm hatası: {str(e)}")
         return False
 
-def download_with_ytdlp(youtube_url, output_path):
+def download_with_ytdlp(youtube_url):
     """yt-dlp ile video indirme"""
     try:
-        # Ensure the output directory exists
-        downloads_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'downloads')
-        os.makedirs(downloads_dir, exist_ok=True)
-        
-        # Create a safer filename template
-        safe_template = '%(title).50s_%(id)s.%(ext)s'  # Reduced title length for safety
-        filename_template = os.path.join(downloads_dir, safe_template)
-        
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'outtmpl': filename_template,
-            'prefer_ffmpeg': True,
-            'keepvideo': False,
-            'quiet': False,
-            'no_warnings': False
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            logger.info(f"Video indiriliyor: {youtube_url}")
-            info_dict = ydl.extract_info(youtube_url, download=True)
-            video_title = info_dict['title']
-            video_id = info_dict['id']
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filename_template = os.path.join(temp_dir, '%(title)s.%(ext)s')
             
-            # Create a very safe filename
-            safe_title = "".join(x for x in video_title if x.isalnum() or x == ' ').strip()
-            safe_title = safe_title[:50]  # Limit length
-            final_filename = f"{safe_title}_{video_id}.mp3"
-            final_path = os.path.join(downloads_dir, final_filename)
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+                'outtmpl': filename_template,
+                'prefer_ffmpeg': True,
+                'keepvideo': False,
+                'quiet': False,
+                'no_warnings': False
+            }
             
-            # Find the actual downloaded file
-            for file in os.listdir(downloads_dir):
-                if file.endswith('.mp3') and video_id in file:
-                    old_path = os.path.join(downloads_dir, file)
-                    if old_path != final_path:
-                        try:
-                            os.rename(old_path, final_path)
-                        except OSError:
-                            final_path = old_path  # If rename fails, use the original path
-                    break
-            
-            if not os.path.exists(final_path):
-                logger.error(f"Dosya oluşturulamadı: {final_path}")
-                raise Exception("Dosya indirme işlemi başarısız oldu")
-            
-            # 432 Hz'e dönüştür
-            hz432_filename = f"{safe_title}_{video_id}_432hz.mp3"
-            hz432_path = os.path.join(downloads_dir, hz432_filename)
-            
-            if convert_to_432hz(final_path, hz432_path):
-                logger.info(f"432 Hz dönüşümü başarılı: {hz432_path}")
-                # Orijinal dosyayı sil
-                os.remove(final_path)
-                return hz432_path
-            else:
-                logger.error("432 Hz dönüşümü başarısız")
-                return final_path
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                logger.info(f"Video indiriliyor: {youtube_url}")
+                info_dict = ydl.extract_info(youtube_url, download=True)
+                video_title = info_dict['title']
                 
-            logger.info(f"Dosya başarıyla indirildi: {final_path}")
-            return final_path
+                # Find the downloaded MP3 file in temp directory
+                mp3_file = None
+                for file in os.listdir(temp_dir):
+                    if file.endswith('.mp3'):
+                        mp3_file = os.path.join(temp_dir, file)
+                        break
+                
+                if not mp3_file:
+                    raise Exception("MP3 dosyası bulunamadı")
+                
+                # Convert to 432Hz in memory
+                audio = AudioSegment.from_mp3(mp3_file)
+                ratio = 432.0 / 440.0
+                new_sample_rate = int(audio.frame_rate * ratio)
+                converted_audio = audio._spawn(audio.raw_data, overrides={
+                    "frame_rate": new_sample_rate
+                })
+                converted_audio = converted_audio.set_frame_rate(audio.frame_rate)
+                
+                # Save to bytes buffer
+                buffer = io.BytesIO()
+                converted_audio.export(buffer, format="mp3", bitrate="192k")
+                buffer.seek(0)
+                
+                return buffer, f"{video_title}_432hz.mp3"
+                
     except Exception as e:
         logger.error(f"İndirme hatası: {str(e)}")
         traceback.print_exc()
@@ -185,39 +171,25 @@ def convert():
             logger.error(f"Geçersiz YouTube URL: {youtube_url}")
             return jsonify({'error': 'Geçersiz YouTube URL formatı'}), 400
 
-        # Temizleme işlemini kontrol et
-        cleanup_downloads()
-
         try:
-            # Download with yt-dlp and get the file path
-            logger.info(f"Video indirme başlıyor: {youtube_url}")
-            downloaded_file = download_with_ytdlp(youtube_url, 'static/downloads')
+            # Download and convert to 432Hz
+            buffer, filename = download_with_ytdlp(youtube_url)
             
-            if not os.path.exists(downloaded_file):
-                logger.error(f"İndirilen dosya bulunamadı: {downloaded_file}")
-                return jsonify({'error': 'Dosya indirme işlemi başarısız oldu'}), 500
-
-            # Get just the filename from the path
-            filename = os.path.basename(downloaded_file)
-            logger.info(f"Dönüştürme başarılı. Dosya: {filename}")
-            
-            return jsonify({
-                'success': True,
-                'message': 'Dönüştürme başarılı',
-                'filename': filename
-            })
+            # Return the file directly from memory
+            return send_file(
+                buffer,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='audio/mpeg'
+            )
 
         except Exception as e:
-            error_msg = f"Dönüştürme hatası: {str(e)}"
-            logger.error(error_msg)
-            logger.error(traceback.format_exc())
-            return jsonify({'error': error_msg}), 500
+            logger.error(f"Dönüştürme hatası: {str(e)}")
+            return jsonify({'error': 'Dönüştürme işlemi başarısız oldu'}), 500
 
     except Exception as e:
-        error_msg = f"Genel hata: {str(e)}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
-        return jsonify({'error': error_msg}), 500
+        logger.error(f"Genel hata: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/download/<filename>')
 def download(filename):

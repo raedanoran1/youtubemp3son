@@ -108,28 +108,39 @@
                     body: JSON.stringify({ youtube_url: url })
                 });
 
-                const data = await response.json();
-
                 if (!response.ok) {
+                    const data = await response.json();
                     throw new Error(data.error || 'Dönüştürme işlemi başarısız oldu');
                 }
 
-                // Sonuçları göster
-                document.getElementById('result').classList.remove('hidden');
-                document.getElementById('downloadBtn').href = `/download/${encodeURIComponent(data.filename)}`;
-                
-                // Video başlığını filename'den al (uzantıyı kaldırarak)
-                const videoTitle = data.filename.replace('.mp3', '');
-                document.getElementById('videoTitle').textContent = videoTitle;
-                
-                // Thumbnail ve author bilgilerini gizle çünkü backend'den gelmiyor
-                document.getElementById('thumbnail').style.display = 'none';
-                document.getElementById('videoAuthor').style.display = 'none';
+                // İndirme işlemini başlat
+                const blob = await response.blob();
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const filename = response.headers.get('content-disposition')?.split('filename=')[1]?.replace(/"/g, '') || 'download.mp3';
+
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(downloadUrl);
+                document.body.removeChild(a);
+
+                // Başarı mesajı göster
+                showSuccess('Dönüştürme işlemi başarılı! İndirme başlıyor...');
             } catch (error) {
                 showError(error.message);
             } finally {
                 document.getElementById('loading').classList.remove('active');
             }
+        }
+
+        function showSuccess(message) {
+            const successDiv = document.createElement('div');
+            successDiv.className = 'bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4';
+            successDiv.innerHTML = message;
+            document.querySelector('.max-w-3xl').insertBefore(successDiv, document.getElementById('loading'));
+            setTimeout(() => successDiv.remove(), 5000);
         }
     </script>
 </body>
