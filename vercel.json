@@ -1,18 +1,6 @@
 {
-    "version": 2,
-    "builds": [
-        {
-            "src": "app.py",
-            "use": "@vercel/python",
-            "config": {
-                "runtime": "python3.9"
-            }
-        },
-        {
-            "src": "static/**",
-            "use": "@vercel/static"
-        }
-    ],
+    "framework": "flask",
+    "outputDirectory": "static",
     "routes": [
         {
             "src": "/static/(.*)",
@@ -20,10 +8,11 @@
         },
         {
             "src": "/(.*)",
-            "dest": "app.py"
+            "dest": "/app.py"
         }
     ],
     "env": {
-        "PYTHONUNBUFFERED": "1"
+        "PYTHONUNBUFFERED": "1",
+        "PYTHON_VERSION": "3.9"
     }
 }
