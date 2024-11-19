@@ -1,8 +1,8 @@
-yt-dlp==2023.3.4
-Flask==2.0.1
-Flask-Cors==3.0.10
-moviepy==1.0.3
-pydub==0.25.1
-numpy==1.21.6
-ffmpeg-python==0.2.0
-Werkzeug==2.0.3
+yt-dlp>=2023.3.4
+Flask>=2.0.1
+Flask-Cors>=3.0.10
+moviepy>=1.0.3
+pydub>=0.25.1
+numpy>=1.26.0
+ffmpeg-python>=0.2.0
+Werkzeug>=2.0.3
