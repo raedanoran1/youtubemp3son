@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, Response
+from flask import Flask, request, jsonify, send_file, Response, send_from_directory
 from flask_cors import CORS
 from moviepy.editor import AudioFileClip
 import os
@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__, static_url_path='/static', static_folder='static')
+app = Flask(__name__)
 CORS(app)
 
 # Temizleme işlemi için son indirme zamanını takip etmek için global değişken
@@ -169,11 +169,15 @@ def download_with_ytdlp(youtube_url):
 
 @app.route('/')
 def index():
-    return app.send_static_file('index.html')
+    return send_from_directory('static', 'index.html')
 
 @app.route('/favicon.ico')
 def favicon():
-    return app.send_static_file('favicon.ico')
+    return send_from_directory('static', 'favicon.ico')
+
+@app.route('/static/<path:path>')
+def serve_static(path):
+    return send_from_directory('static', path)
 
 @app.route('/convert', methods=['POST'])
 def convert():
